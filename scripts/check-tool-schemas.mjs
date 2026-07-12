@@ -16,13 +16,13 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const htmlPath = path.join(here, "..", "ats-resume-checker.html");
 const html = fs.readFileSync(htmlPath, "utf8");
 
-const start = html.indexOf("const EXTRACT_RESUME_TOOL = {");
+const start = html.indexOf("const NULLABLE_STRING = {");
 const end = html.indexOf("async function extractResumeWithClaude");
 
 if (start === -1 || end === -1 || end <= start) {
   console.error(
     "Could not locate the tool schema block in ats-resume-checker.html " +
-      "(expected 'const EXTRACT_RESUME_TOOL = {' ... 'async function extractResumeWithClaude'). " +
+      "(expected 'const NULLABLE_STRING = {' ... 'async function extractResumeWithClaude'). " +
       "Did the file get restructured? Update scripts/check-tool-schemas.mjs if so."
   );
   process.exit(1);
@@ -30,12 +30,12 @@ if (start === -1 || end === -1 || end <= start) {
 
 const schemaSource = html.slice(start, end);
 
-let EXTRACT_RESUME_TOOL, SUGGESTION_SCHEMA, ANALYZE_MATCH_TOOL;
+let EXTRACT_RESUME_TOOL, SUGGESTION_SCHEMA, ANALYZE_MATCH_TOOL, NULLABLE_STRING;
 try {
   const evaluate = new Function(
-    `${schemaSource}\nreturn { EXTRACT_RESUME_TOOL, SUGGESTION_SCHEMA, ANALYZE_MATCH_TOOL };`
+    `${schemaSource}\nreturn { EXTRACT_RESUME_TOOL, SUGGESTION_SCHEMA, ANALYZE_MATCH_TOOL, NULLABLE_STRING };`
   );
-  ({ EXTRACT_RESUME_TOOL, SUGGESTION_SCHEMA, ANALYZE_MATCH_TOOL } = evaluate());
+  ({ EXTRACT_RESUME_TOOL, SUGGESTION_SCHEMA, ANALYZE_MATCH_TOOL, NULLABLE_STRING } = evaluate());
 } catch (err) {
   console.error("Tool schema definitions failed to evaluate as JavaScript:", err.message);
   process.exit(1);
