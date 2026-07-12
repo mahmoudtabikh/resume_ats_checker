@@ -623,6 +623,20 @@ const EXTRACT_RESUME_TOOL = {
   }
 };
 
+const SUGGESTION_SCHEMA = {
+  type: 'object',
+  properties: {
+    title: { type: 'string' },
+    what: { type: 'string' },
+    where: { type: 'string' },
+    why: { type: 'string' },
+    before: { type: 'string' },
+    after: { type: 'string' },
+    impact: { type: 'string', description: "e.g. '+12 pts'" }
+  },
+  required: ['title','what','where','why','before','after','impact']
+};
+
 const ANALYZE_MATCH_TOOL = {
   name: 'analyze_match',
   description: 'Compare an already-extracted resume against a job description and produce a full ATS-style match analysis.',
@@ -724,9 +738,9 @@ const ANALYZE_MATCH_TOOL = {
       sugs: {
         type: 'object',
         properties: {
-          high: { type: 'array', items: { '$ref': '#/$defs/suggestion' } },
-          medium: { type: 'array', items: { '$ref': '#/$defs/suggestion' } },
-          low: { type: 'array', items: { '$ref': '#/$defs/suggestion' } }
+          high: { type: 'array', items: SUGGESTION_SCHEMA },
+          medium: { type: 'array', items: SUGGESTION_SCHEMA },
+          low: { type: 'array', items: SUGGESTION_SCHEMA }
         },
         required: ['high','medium','low']
       },
@@ -741,22 +755,7 @@ const ANALYZE_MATCH_TOOL = {
         required: ['summary','highlights','rewrites','explanations']
       }
     },
-    required: ['keywords','scores','sections','reqfmt','sugs','analysis'],
-    '$defs': {
-      suggestion: {
-        type: 'object',
-        properties: {
-          title: { type: 'string' },
-          what: { type: 'string' },
-          where: { type: 'string' },
-          why: { type: 'string' },
-          before: { type: 'string' },
-          after: { type: 'string' },
-          impact: { type: 'string', description: "e.g. '+12 pts'" }
-        },
-        required: ['title','what','where','why','before','after','impact']
-      }
-    }
+    required: ['keywords','scores','sections','reqfmt','sugs','analysis']
   }
 };
 

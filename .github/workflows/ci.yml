@@ -1,0 +1,73 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Python syntax check
+        run: python -m py_compile server.py
+
+      - name: Tool schema check (Anthropic tool_use compatibility)
+        run: node scripts/check-tool-schemas.mjs
+
+      - name: Start server and run deployment smoke test
+        env:
+          ANTHROPIC_API_KEY: placeholder-not-a-real-key
+          ATS_USERS: "citest:citestpass123"
+        run: |
+          python server.py 8000 &
+          SERVER_PID=$!
+          trap "kill $SERVER_PID" EXIT
+
+          # Give the server a moment to bind the port.
+          for i in $(seq 1 10); do
+            if curl -s -o /dev/null http://127.0.0.1:8000/api/health; then break; fi
+            sleep 0.5
+          done
+
+          fail=0
+
+          check() {
+            local desc="$1" expected="$2" actual="$3"
+            if [ "$expected" != "$actual" ]; then
+              echo "FAIL: $desc — expected $expected, got $actual"
+              fail=1
+            else
+              echo "OK: $desc ($actual)"
+            fi
+          }
+
+          # /api/health must stay public and reachable (Render's health check hits this).
+          check "public health endpoint" "200" "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8000/api/health)"
+
+          # The main page must require auth when ATS_USERS is set.
+          check "unauthenticated request rejected" "401" "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8000/)"
+
+          # Correct credentials must be accepted.
+          check "authenticated request accepted" "200" "$(curl -s -o /dev/null -w '%{http_code}' -u citest:citestpass123 http://127.0.0.1:8000/)"
+
+          # Wrong credentials must be rejected.
+          check "wrong credentials rejected" "401" "$(curl -s -o /dev/null -w '%{http_code}' -u citest:wrongpassword http://127.0.0.1:8000/)"
+
+          # The proxy must forward to Anthropic (placeholder key -> Anthropic itself returns 401).
+          check "proxy forwards to Anthropic" "401" "$(curl -s -o /dev/null -w '%{http_code}' -u citest:citestpass123 -X POST -H 'Content-Type: application/json' -d '{"model":"claude-sonnet-4-6","max_tokens":20,"messages":[{"role":"user","content":"ping"}]}' http://127.0.0.1:8000/api/claude)"
+
+          exit $fail
