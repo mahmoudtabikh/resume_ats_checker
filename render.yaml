@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: ats-resume-checker
+    runtime: python
+    plan: free
+    buildCommand: "true"
+    startCommand: python server.py
+    healthCheckPath: /api/health
+    envVars:
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: ATS_USERNAME
+        sync: false
+      - key: ATS_PASSWORD
+        sync: false

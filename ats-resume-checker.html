@@ -1,0 +1,1108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ATS Lens — Resume vs Job Match Analyzer</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js"></script>
+<style>
+:root{
+  --canvas:#EDF1F0;
+  --surface:#FFFFFF;
+  --ink:#131A22;
+  --muted:#5B6672;
+  --line:#D8DEDD;
+  --scan:#0B7A5C;
+  --scan-soft:#E2F1EC;
+  --amber:#B45309;
+  --amber-soft:#FBEEDC;
+  --red:#B3362B;
+  --red-soft:#F9E7E4;
+  --blue:#2456C7;
+  --blue-soft:#E6ECFA;
+  --radius:10px;
+  --mono:'JetBrains Mono',ui-monospace,monospace;
+  --disp:'Space Grotesk',sans-serif;
+  --body:'Inter',system-ui,sans-serif;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html{scroll-behavior:smooth}
+body{font-family:var(--body);background:var(--canvas);color:var(--ink);font-size:15px;line-height:1.55}
+button{font-family:inherit;cursor:pointer}
+input,textarea,select{font-family:inherit;font-size:14px;color:var(--ink)}
+a{color:var(--blue)}
+
+/* ---------- header ---------- */
+.topbar{background:var(--ink);color:#fff;padding:0 24px;height:58px;display:flex;align-items:center;gap:16px;position:sticky;top:0;z-index:40}
+.wordmark{font-family:var(--disp);font-weight:700;font-size:19px;letter-spacing:.02em;display:flex;align-items:center;gap:10px}
+.wordmark .lens{width:22px;height:22px;border:2px solid #4ADE9C;border-radius:50%;position:relative;display:inline-block}
+.wordmark .lens::after{content:'';position:absolute;left:2px;right:2px;top:8px;height:2px;background:#4ADE9C;animation:scanline 2.4s ease-in-out infinite}
+@keyframes scanline{0%,100%{top:3px}50%{top:13px}}
+@media (prefers-reduced-motion:reduce){.wordmark .lens::after{animation:none}}
+.topbar .tagline{font-family:var(--mono);font-size:11px;color:#93A2AE;letter-spacing:.06em;text-transform:uppercase}
+.topbar .actions{margin-left:auto;display:flex;gap:8px}
+.btn{border:1px solid var(--line);background:var(--surface);color:var(--ink);border-radius:8px;padding:8px 14px;font-size:13px;font-weight:600}
+.btn:hover{border-color:var(--muted)}
+.btn:focus-visible,.tab:focus-visible,input:focus-visible,textarea:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
+.btn.primary{background:var(--scan);border-color:var(--scan);color:#fff}
+.btn.primary:hover{background:#096349}
+.btn.ghost{background:transparent;border-color:#3A4653;color:#D5DDE4}
+.btn.ghost:hover{border-color:#93A2AE}
+.btn:disabled{opacity:.5;cursor:not-allowed}
+
+.wrap{max-width:1180px;margin:0 auto;padding:28px 24px 80px}
+
+/* ---------- setup ---------- */
+.setup-grid{display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-top:18px}
+@media(max-width:900px){.setup-grid{grid-template-columns:1fr}}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:22px}
+.card h2{font-family:var(--disp);font-size:17px;font-weight:600;margin-bottom:4px}
+.card .sub{color:var(--muted);font-size:13px;margin-bottom:14px}
+.step-tag{font-family:var(--mono);font-size:11px;color:var(--scan);letter-spacing:.08em;text-transform:uppercase;display:block;margin-bottom:6px}
+
+.dropzone{border:2px dashed var(--line);border-radius:var(--radius);padding:36px 20px;text-align:center;color:var(--muted);transition:border-color .15s,background .15s;position:relative;overflow:hidden}
+.dropzone.drag{border-color:var(--scan);background:var(--scan-soft)}
+.dropzone .big{font-family:var(--disp);font-size:15px;color:var(--ink);font-weight:600;margin-bottom:4px}
+.dropzone .hint{font-size:12.5px}
+.dropzone input{position:absolute;inset:0;opacity:0;cursor:pointer}
+.filechip{display:none;margin-top:12px;background:var(--scan-soft);border:1px solid var(--scan);border-radius:8px;padding:10px 12px;font-family:var(--mono);font-size:12.5px;color:var(--scan);text-align:left;align-items:center;gap:8px;justify-content:space-between}
+.filechip.show{display:flex}
+.filechip button{background:none;border:none;color:var(--red);font-weight:700;font-size:14px}
+
+.jd-modes{display:flex;gap:0;border:1px solid var(--line);border-radius:8px;overflow:hidden;margin-bottom:12px;width:max-content}
+.jd-modes button{border:none;background:var(--surface);padding:7px 16px;font-size:13px;font-weight:600;color:var(--muted)}
+.jd-modes button.on{background:var(--ink);color:#fff}
+label.f{display:block;font-size:12.5px;font-weight:600;margin:12px 0 5px;color:var(--ink)}
+input[type=text],input[type=url],textarea{width:100%;border:1px solid var(--line);border-radius:8px;padding:9px 11px;background:#FBFCFC}
+textarea{min-height:170px;resize:vertical;font-size:13px;line-height:1.5}
+.url-row{display:flex;gap:8px}
+.url-row input{flex:1}
+.notice{margin-top:10px;font-size:12.5px;border-radius:8px;padding:9px 11px;display:none}
+.notice.show{display:block}
+.notice.warn{background:var(--amber-soft);color:var(--amber);border:1px solid #E7C79B}
+.notice.ok{background:var(--scan-soft);color:var(--scan);border:1px solid #A9D5C6}
+.analyze-bar{margin-top:20px;display:flex;align-items:center;gap:14px}
+.analyze-bar .req{font-size:12.5px;color:var(--muted)}
+
+/* ---------- progress ---------- */
+#progress{display:none;margin-top:22px}
+#progress.show{display:block}
+.prog-steps{display:grid;gap:8px;margin-top:14px}
+.pstep{display:flex;align-items:center;gap:10px;font-size:13.5px;font-family:var(--mono)}
+.pstep .dot{width:14px;height:14px;border-radius:50%;border:2px solid var(--line);flex:none}
+.pstep.run .dot{border-color:var(--scan);border-top-color:transparent;animation:spin 1s linear infinite}
+.pstep.done .dot{background:var(--scan);border-color:var(--scan)}
+.pstep.fail .dot{background:var(--red);border-color:var(--red)}
+.pstep.done{color:var(--scan)}
+.pstep.fail{color:var(--red)}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* ---------- dashboard ---------- */
+#results{display:none}
+#results.show{display:block}
+.dash{display:grid;grid-template-columns:250px 1fr;gap:20px;margin-top:22px}
+@media(max-width:900px){.dash{grid-template-columns:1fr}}
+.score-card{background:var(--ink);color:#fff;border-radius:var(--radius);padding:24px;text-align:center;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px}
+.dial{position:relative;width:150px;height:150px}
+.dial svg{transform:rotate(-90deg)}
+.dial .num{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;font-family:var(--disp)}
+.dial .num b{font-size:38px;font-weight:700;line-height:1}
+.dial .num span{font-size:11px;color:#93A2AE;font-family:var(--mono);letter-spacing:.08em;text-transform:uppercase;margin-top:4px}
+.score-card .verdict{font-family:var(--mono);font-size:12px;letter-spacing:.06em;padding:4px 12px;border-radius:20px;text-transform:uppercase}
+.stat-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+@media(max-width:700px){.stat-grid{grid-template-columns:repeat(2,1fr)}}
+.stat{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:14px 16px}
+.stat .k{font-family:var(--mono);font-size:10.5px;color:var(--muted);letter-spacing:.07em;text-transform:uppercase;margin-bottom:6px}
+.stat .v{font-family:var(--disp);font-size:22px;font-weight:700}
+.stat .d{font-size:12px;color:var(--muted);margin-top:2px}
+.stat.wide{grid-column:span 3}
+@media(max-width:700px){.stat.wide{grid-column:span 2}}
+.chiprow{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
+.chip{font-family:var(--mono);font-size:11.5px;padding:3px 9px;border-radius:14px;border:1px solid var(--line);background:#FBFCFC}
+.chip.good{background:var(--scan-soft);border-color:#A9D5C6;color:var(--scan)}
+.chip.bad{background:var(--red-soft);border-color:#E5B4AE;color:var(--red)}
+.chip.warn{background:var(--amber-soft);border-color:#E7C79B;color:var(--amber)}
+
+/* ---------- tabs ---------- */
+.tabs{display:flex;gap:4px;margin:26px 0 0;border-bottom:2px solid var(--line);overflow-x:auto}
+.tab{border:none;background:none;padding:10px 16px;font-size:13.5px;font-weight:600;color:var(--muted);border-bottom:2px solid transparent;margin-bottom:-2px;white-space:nowrap}
+.tab.on{color:var(--ink);border-bottom-color:var(--scan)}
+.panel{display:none;padding-top:20px}
+.panel.on{display:block}
+
+/* ---------- shared result pieces ---------- */
+.bar{height:8px;background:#E4E9E8;border-radius:6px;overflow:hidden}
+.bar i{display:block;height:100%;border-radius:6px}
+.cat{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:16px 18px;margin-bottom:12px}
+.cat .head{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px;gap:12px}
+.cat .head b{font-family:var(--disp);font-size:15px}
+.cat .head .pct{font-family:var(--mono);font-weight:600;font-size:14px}
+.cat p{font-size:13.5px;color:#3C4650;margin-top:9px}
+table{width:100%;border-collapse:collapse;background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;font-size:13px}
+th{font-family:var(--mono);font-size:10.5px;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);text-align:left;padding:10px 12px;background:#F4F7F6;border-bottom:1px solid var(--line)}
+td{padding:10px 12px;border-bottom:1px solid #EDF1F0;vertical-align:top}
+tr:last-child td{border-bottom:none}
+.pill{font-family:var(--mono);font-size:11px;padding:2px 9px;border-radius:12px;white-space:nowrap}
+.pill.hi{background:var(--red-soft);color:var(--red)}
+.pill.med{background:var(--amber-soft);color:var(--amber)}
+.pill.lo{background:var(--blue-soft);color:var(--blue)}
+.pill.yes{background:var(--scan-soft);color:var(--scan)}
+.pill.no{background:var(--red-soft);color:var(--red)}
+.pill.part{background:var(--amber-soft);color:var(--amber)}
+
+.sec{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);margin-bottom:12px;overflow:hidden}
+.sec>button{width:100%;display:flex;justify-content:space-between;align-items:center;background:none;border:none;padding:14px 18px;font-family:var(--disp);font-size:15px;font-weight:600;text-align:left}
+.sec>button::after{content:'+';font-size:18px;color:var(--muted)}
+.sec.open>button::after{content:'−'}
+.sec .body{display:none;padding:0 18px 16px;font-size:13.5px}
+.sec.open .body{display:block}
+.sec h4{font-family:var(--mono);font-size:10.5px;text-transform:uppercase;letter-spacing:.07em;margin:12px 0 5px}
+.sec h4.g{color:var(--scan)}.sec h4.b{color:var(--red)}.sec h4.a{color:var(--amber)}.sec h4.i{color:var(--blue)}
+.sec ul{padding-left:18px}
+.sec li{margin-bottom:4px}
+
+.sug{background:var(--surface);border:1px solid var(--line);border-left:4px solid var(--line);border-radius:var(--radius);padding:16px 18px;margin-bottom:12px}
+.sug.hi{border-left-color:var(--red)}
+.sug.med{border-left-color:var(--amber)}
+.sug.lo{border-left-color:var(--blue)}
+.sug .top{display:flex;justify-content:space-between;gap:10px;align-items:flex-start;margin-bottom:8px}
+.sug .top b{font-family:var(--disp);font-size:14.5px}
+.sug .impact{font-family:var(--mono);font-size:11.5px;color:var(--scan);white-space:nowrap}
+.sug .meta{font-size:13px;color:#3C4650;margin-bottom:4px}
+.sug .meta b{font-weight:600}
+.ba{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px}
+@media(max-width:700px){.ba{grid-template-columns:1fr}}
+.ba div{border-radius:8px;padding:10px 12px;font-size:12.5px;line-height:1.5}
+.ba .before{background:var(--red-soft);border:1px solid #E5B4AE}
+.ba .after{background:var(--scan-soft);border:1px solid #A9D5C6}
+.ba span{display:block;font-family:var(--mono);font-size:10px;text-transform:uppercase;letter-spacing:.08em;margin-bottom:5px}
+.ba .before span{color:var(--red)}
+.ba .after span{color:var(--scan)}
+
+.parsed{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:20px;font-size:13.5px}
+.parsed .fld{display:grid;grid-template-columns:150px 1fr;gap:10px;padding:8px 0;border-bottom:1px dashed #E4E9E8}
+.parsed .fld:last-child{border-bottom:none}
+.parsed .fld .k{font-family:var(--mono);font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;padding-top:2px}
+.parsed .job{margin-bottom:12px;padding:10px 12px;background:#F7FAF9;border-radius:8px;border:1px solid #E4E9E8}
+.parsed .job b{font-size:13.5px}
+.parsed .job .dates{font-family:var(--mono);font-size:11.5px;color:var(--muted)}
+.parsed ul{padding-left:18px;margin-top:5px}
+.issue{display:flex;gap:9px;background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:11px 13px;margin-bottom:8px;font-size:13px}
+.issue::before{content:'!';font-family:var(--mono);font-weight:700;flex:none;width:20px;height:20px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px}
+.issue.err::before{background:var(--red-soft);color:var(--red)}
+.issue.warn::before{background:var(--amber-soft);color:var(--amber)}
+.issue.info::before{background:var(--blue-soft);color:var(--blue)}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+@media(max-width:900px){.grid2{grid-template-columns:1fr}}
+h3.blocktitle{font-family:var(--disp);font-size:16px;margin:22px 0 10px}
+h3.blocktitle:first-child{margin-top:0}
+.empty{color:var(--muted);font-size:13px;font-style:italic}
+.tiny{font-size:12px;color:var(--muted)}
+
+/* ---------- print ---------- */
+@media print{
+  .topbar,.setup-wrap,#progress,.tabs,.no-print{display:none!important}
+  body{background:#fff}
+  .wrap{max-width:100%;padding:0}
+  #results{display:block!important}
+  .panel{display:block!important;page-break-before:always;padding-top:16px}
+  .panel:first-of-type{page-break-before:avoid}
+  .panel::before{content:attr(data-title);font-family:var(--disp);font-weight:700;font-size:18px;display:block;margin-bottom:12px}
+  .sec .body{display:block}
+  .sec>button::after{content:''}
+}
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <div class="wordmark"><span class="lens"></span>ATS Lens</div>
+  <span class="tagline">resume vs job match analyzer</span>
+  <div class="actions no-print">
+    <button class="btn ghost" id="btnJson" style="display:none">Download parsed JSON</button>
+    <button class="btn ghost" id="btnPdf" style="display:none">Export PDF report</button>
+    <button class="btn ghost" id="btnReset" style="display:none">New analysis</button>
+  </div>
+</header>
+
+<div class="wrap">
+
+  <!-- ============ SETUP ============ -->
+  <div class="setup-wrap" id="setup">
+    <div class="setup-grid">
+      <div class="card">
+        <span class="step-tag">Step 1 — Resume</span>
+        <h2>Upload your CV</h2>
+        <div class="sub">PDF or DOCX. The file is parsed the same way an ATS reads it: raw text extraction, no visual layout.</div>
+        <div class="dropzone" id="dz">
+          <div class="big">Drop your CV here</div>
+          <div class="hint">or click to browse · PDF / DOCX · max 10 MB</div>
+          <input type="file" id="fileInput" accept=".pdf,.docx" aria-label="Upload CV file">
+        </div>
+        <div class="filechip" id="filechip"><span id="filename"></span><button id="fileRemove" aria-label="Remove file">✕</button></div>
+        <div class="notice warn" id="fileNotice"></div>
+      </div>
+
+      <div class="card">
+        <span class="step-tag">Step 2 — Target job</span>
+        <h2>Job description</h2>
+        <div class="sub">Paste the posting text, or let the app try to fetch it from a URL.</div>
+        <div class="jd-modes" role="tablist">
+          <button id="modePaste" class="on">Paste text</button>
+          <button id="modeUrl">From URL</button>
+        </div>
+        <div id="pasteBox">
+          <label class="f" for="jdText">Job posting text</label>
+          <textarea id="jdText" placeholder="Paste the full job description here…"></textarea>
+        </div>
+        <div id="urlBox" style="display:none">
+          <label class="f" for="jdUrl">Job posting URL</label>
+          <div class="url-row">
+            <input type="url" id="jdUrl" placeholder="https://careers.example.com/job/12345">
+            <button class="btn" id="btnFetch">Fetch</button>
+          </div>
+          <div class="notice" id="urlNotice"></div>
+          <div id="urlFallback" style="display:none">
+            <label class="f" for="jdTextFallback">Paste the job description manually</label>
+            <textarea id="jdTextFallback"></textarea>
+          </div>
+        </div>
+        <label class="f" for="jobTitle">Job title / position <span class="tiny">(required)</span></label>
+        <input type="text" id="jobTitle" placeholder="e.g. Machine Learning Engineer">
+      </div>
+    </div>
+
+    <div class="analyze-bar">
+      <button class="btn primary" id="btnAnalyze" style="padding:11px 26px;font-size:14.5px">Run ATS analysis</button>
+      <button class="btn" id="btnPreview" style="padding:11px 18px;font-size:14.5px">Preview extracted CV</button>
+      <span class="req" id="reqHint">Needs: a CV file. Job description and title are only needed for the full match analysis.</span>
+    </div>
+
+    <div id="progress" class="card">
+      <h2 style="font-family:var(--disp)">Analyzing…</h2>
+      <div class="sub">The app builds a deterministic ATS profile first, then uses one Claude synthesis pass for natural-language guidance.</div>
+      <div class="prog-steps" id="progSteps"></div>
+    </div>
+  </div>
+
+  <!-- ============ RESULTS ============ -->
+  <div id="results">
+    <div class="dash">
+      <div class="score-card">
+        <div class="dial">
+          <svg width="150" height="150" viewBox="0 0 150 150">
+            <circle cx="75" cy="75" r="64" fill="none" stroke="#2A3542" stroke-width="12"/>
+            <circle id="dialArc" cx="75" cy="75" r="64" fill="none" stroke="#4ADE9C" stroke-width="12" stroke-linecap="round" stroke-dasharray="402" stroke-dashoffset="402"/>
+          </svg>
+          <div class="num"><b id="dialNum">–</b><span>ATS match</span></div>
+        </div>
+        <div class="verdict" id="verdict"></div>
+      </div>
+      <div class="stat-grid">
+        <div class="stat"><div class="k">Parsing quality</div><div class="v" id="stParse">–</div><div class="d" id="stParseD"></div></div>
+        <div class="stat"><div class="k">Keyword coverage</div><div class="v" id="stKw">–</div><div class="d" id="stKwD"></div></div>
+        <div class="stat"><div class="k">ATS compatibility</div><div class="v" id="stAts">–</div><div class="d" id="stAtsD"></div></div>
+        <div class="stat wide"><div class="k">Top strengths</div><div class="chiprow" id="stStrengths"></div></div>
+        <div class="stat wide"><div class="k">Missing skills</div><div class="chiprow" id="stMissing"></div></div>
+        <div class="stat wide"><div class="k">Highest priority improvements</div><div class="chiprow" id="stPriority"></div></div>
+      </div>
+    </div>
+
+    <nav class="tabs no-print" id="tabnav">
+      <button class="tab on" data-p="pParse">ATS Parsing</button>
+      <button class="tab" data-p="pScore">Match Score</button>
+      <button class="tab" data-p="pKw">Keywords</button>
+      <button class="tab" data-p="pSec">Resume Sections</button>
+      <button class="tab" data-p="pSug">Suggestions</button>
+      <button class="tab" data-p="pFmt">Formatting & Requirements</button>
+    </nav>
+
+    <div class="panel on" id="pParse" data-title="ATS Parsing"></div>
+    <div class="panel" id="pScore" data-title="Match Score"></div>
+    <div class="panel" id="pKw" data-title="Keyword Analysis"></div>
+    <div class="panel" id="pSec" data-title="Resume Section Analysis"></div>
+    <div class="panel" id="pSug" data-title="Improvement Suggestions"></div>
+    <div class="panel" id="pFmt" data-title="Formatting & Requirements"></div>
+  </div>
+
+</div>
+
+<script>
+/* ================= state ================= */
+const S = {
+  file:null, fileName:'', fileType:'', resumeText:'', resumeTextForAnalysis:'', heur:null,
+  parsed:null, scores:null, keywords:null, sections:null, reqfmt:null, sugs:null, analysis:null,
+  extractionPreflight:null
+};
+const CLAUDE_PROXY_URL = '/api/claude';
+const CLAUDE_MODEL = 'claude-sonnet-4-6';
+pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+const $ = id => document.getElementById(id);
+const esc = s => String(s??'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+/* ================= file handling ================= */
+const dz = $('dz'), fi = $('fileInput');
+['dragenter','dragover'].forEach(e => dz.addEventListener(e, ev => { ev.preventDefault(); dz.classList.add('drag'); }));
+['dragleave','drop'].forEach(e => dz.addEventListener(e, ev => { ev.preventDefault(); dz.classList.remove('drag'); }));
+dz.addEventListener('drop', ev => { if (ev.dataTransfer.files[0]) handleFile(ev.dataTransfer.files[0]); });
+fi.addEventListener('change', () => { if (fi.files[0]) handleFile(fi.files[0]); });
+$('fileRemove').addEventListener('click', () => { S.file = null; S.resumeText = ''; $('filechip').classList.remove('show'); fi.value = ''; note('fileNotice',''); });
+
+function note(id, msg, cls){ const n = $(id); if (!msg){ n.className = n.className.replace(' show',''); n.textContent = ''; return; } n.textContent = msg; n.className = 'notice ' + (cls||'warn') + ' show'; }
+
+async function handleFile(f){
+  note('fileNotice','');
+  const ext = f.name.toLowerCase().split('.').pop();
+  if (!['pdf','docx'].includes(ext)) return note('fileNotice','Unsupported file type. Upload a PDF or DOCX file.');
+  if (f.size > 10*1024*1024) return note('fileNotice','File exceeds 10 MB.');
+  $('filename').textContent = f.name + ' · ' + (f.size/1024).toFixed(0) + ' KB';
+  $('filechip').classList.add('show');
+  try {
+    if (ext === 'pdf') await readPdf(f); else await readDocx(f);
+    S.file = f; S.fileName = f.name; S.fileType = ext;
+    S.resumeTextForAnalysis = S.resumeText;
+    S.extractionPreflight = getExtractionPreflight(S.resumeText, S.heur);
+    if (!S.extractionPreflight.ok) {
+      note('fileNotice','Extraction preflight failed: ' + S.extractionPreflight.reason, 'warn');
+    } else {
+      note('fileNotice','Text extracted: ' + S.resumeText.length.toLocaleString() + ' characters across ' + (S.heur.pages||1) + (S.heur.pages===1?' page.':' pages.'),'ok');
+    }
+  } catch(err){
+    note('fileNotice','Could not read the file: ' + err.message);
+  }
+}
+
+async function readPdf(f){
+  const buf = await f.arrayBuffer();
+  const doc = await pdfjsLib.getDocument({data:buf}).promise;
+  let text = '', linksSeen = 0;
+  for (let p = 1; p <= doc.numPages; p++){
+    const page = await doc.getPage(p);
+    const tc = await page.getTextContent();
+    let lastY = null, line = [];
+    const lines = [];
+    for (const it of tc.items){
+      const y = Math.round(it.transform[5]);
+      if (lastY !== null && Math.abs(y - lastY) > 3){ lines.push(line.join(' ')); line = []; }
+      line.push(it.str); lastY = y;
+    }
+    if (line.length) lines.push(line.join(' '));
+    const ann = await page.getAnnotations();
+    linksSeen += ann.filter(a => a.url).length;
+    text += lines.join('\n') + '\n\n';
+  }
+  S.resumeText = text.replace(/[ \t]+/g,' ').replace(/\n{3,}/g,'\n\n').trim();
+  S.heur = buildHeuristics(S.resumeText, { pages: doc.numPages, links: linksSeen, source: 'pdf' });
+}
+
+async function readDocx(f){
+  const buf = await f.arrayBuffer();
+  const res = await mammoth.extractRawText({ arrayBuffer: buf });
+  S.resumeText = res.value.replace(/\n{3,}/g,'\n\n').trim();
+  S.heur = buildHeuristics(S.resumeText, { pages: 1, links: (S.resumeText.match(/https?:\/\//g)||[]).length, source: 'docx', mammothMessages: res.messages.length });
+}
+
+function buildHeuristics(text, meta){
+  const lines = text.split('\n').filter(l => l.trim());
+  const wideGap = lines.filter(l => /\s{4,}\S/.test(l)).length;
+  const specials = (text.match(/[\u2500-\u25FF\u2700-\u27BF\uE000-\uF8FF\uD83C-\uDBFF]/g)||[]).length;
+  return {
+    ...meta,
+    chars: text.length,
+    lines: lines.length,
+    avgLineLen: Math.round(text.length / Math.max(lines.length,1)),
+    hasEmail: /[\w.+-]+@[\w-]+\.[\w.]+/.test(text),
+    hasPhone: /(\+?\d[\d\s\-()\/]{7,})/.test(text),
+    columnSuspect: wideGap > lines.length * 0.25,
+    iconGlyphs: specials,
+    bulletChars: [...new Set((text.match(/^[\s]*([•▪●○◦‣·\-–*»➤✓✔])/gm)||[]).map(m => m.trim()[0]))]
+  };
+}
+
+function getExtractionPreflight(text, heur){
+  const clean = String(text || '').trim();
+  const words = clean.split(/\s+/).filter(Boolean);
+  const wordCount = words.length;
+  const hasContact = /[\w.+-]+@[\w-]+\.[\w.]+/.test(clean) || /(\+?\d[\d\s\-()\/]{7,})/.test(clean);
+  const hasStructure = /^(summary|objective|profile|skills|technical skills|experience|work experience|education|projects|certifications|publications|languages|contact|references|achievements|highlights|core competencies|tools|technologies)/im.test(clean);
+  const hasMeaningfulText = clean.length >= 120 && wordCount >= 35 && (hasContact || hasStructure || /[A-Z][a-z]/.test(clean));
+  const score = Math.min(100, Math.round((Math.min(clean.length, 2000) / 2000) * 40 + (wordCount >= 80 ? 25 : wordCount >= 50 ? 15 : 0) + (hasContact ? 15 : 0) + (hasStructure ? 20 : 0)));
+
+  if (!hasMeaningfulText) {
+    return {
+      ok: false,
+      score,
+      reason: 'The extracted resume text is too short or incomplete for a reliable ATS analysis. Try a clearer PDF or DOCX, or paste the text manually.'
+    };
+  }
+
+  return { ok: true, score, reason: '' };
+}
+
+/* ================= JD input ================= */
+let jdMode = 'paste';
+$('modePaste').onclick = () => setMode('paste');
+$('modeUrl').onclick = () => setMode('url');
+function setMode(m){
+  jdMode = m;
+  $('modePaste').classList.toggle('on', m==='paste');
+  $('modeUrl').classList.toggle('on', m==='url');
+  $('pasteBox').style.display = m==='paste' ? '' : 'none';
+  $('urlBox').style.display = m==='url' ? '' : 'none';
+}
+$('btnFetch').onclick = async () => {
+  const url = $('jdUrl').value.trim();
+  if (!url) return note('urlNotice','Enter a URL first.');
+  note('urlNotice','Fetching…','ok');
+  try {
+    const ctrl = new AbortController(); const t = setTimeout(()=>ctrl.abort(), 12000);
+    const r = await fetch(url, { signal: ctrl.signal });
+    clearTimeout(t);
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const html = await r.text();
+    const docp = new DOMParser().parseFromString(html, 'text/html');
+    docp.querySelectorAll('script,style,nav,footer,header').forEach(n => n.remove());
+    const txt = (docp.body?.innerText || '').replace(/\n{3,}/g,'\n\n').trim();
+    if (txt.length < 200) throw new Error('page returned too little readable text');
+    $('urlFallback').style.display = '';
+    $('jdTextFallback').value = txt.slice(0, 20000);
+    note('urlNotice','Fetched ' + txt.length.toLocaleString() + ' characters. Review the text below and trim anything that is not part of the posting.','ok');
+  } catch(err){
+    $('urlFallback').style.display = '';
+    note('urlNotice','The URL could not be fetched from the browser (most job boards block cross site requests — reason: ' + err.message + '). Paste the description manually below; the job title field keeps the analysis on target.','warn');
+  }
+};
+
+function getJD(){
+  if (jdMode === 'paste') return $('jdText').value.trim();
+  return $('jdTextFallback').value.trim();
+}
+
+/* ================= Claude API ================= */
+function buildClaudeErrorMessage(status, data){
+  if (status === 401 || status === 403) return 'Anthropic rejected the API key. Check that the key is valid, not expired, and has access to Claude models.';
+  if (status === 429) return 'Anthropic rate limit reached. Please wait a minute and try again.';
+  if (status >= 500) return 'Anthropic is currently returning a server error. Please try again in a moment.';
+  if (data?.error?.message) return data.error.message;
+  return 'Anthropic returned an unexpected response.';
+}
+
+let connectionValidated = false;
+async function validateClaudeConnection(){
+  if (connectionValidated) return true;
+  try {
+    const r = await fetch(CLAUDE_PROXY_URL, {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ model:CLAUDE_MODEL, max_tokens:20, messages:[{ role:'user', content:'ping' }] })
+    });
+    const text = await r.text();
+    let data = null;
+    try { data = JSON.parse(text); } catch(_){ data = null; }
+    if (!r.ok) throw new Error(buildClaudeErrorMessage(r.status, data));
+    if (!data || !Array.isArray(data.content)) throw new Error('Anthropic responded unexpectedly. The server-side proxy may be misconfigured.');
+    connectionValidated = true;
+    return true;
+  } catch(err){
+    if (err instanceof TypeError && /fetch/i.test(err.message)) {
+      if (window.location.protocol === 'file:') {
+        throw new Error('The page is being opened as a file. Serve it through a local web server (for example, python -m http.server) and try again.');
+      }
+      throw new Error('Could not reach the local Claude proxy. Make sure the server is running and that the page is being served from the same host.');
+    }
+    throw err;
+  }
+}
+
+/**
+ * Calls Claude with a single forced tool so the response is guaranteed to be
+ * JSON matching `tool.input_schema` (no markdown-fence-stripping needed).
+ */
+async function callClaudeTool(prompt, tool, maxTokens, retry = true){
+  await validateClaudeConnection();
+
+  const r = await fetch(CLAUDE_PROXY_URL, {
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({
+      model: CLAUDE_MODEL,
+      max_tokens: maxTokens,
+      tools: [tool],
+      tool_choice: { type:'tool', name: tool.name },
+      messages: [{ role:'user', content: prompt }]
+    })
+  });
+  const text = await r.text();
+  let data = null;
+  try { data = JSON.parse(text); } catch(_){ data = null; }
+  if (!r.ok) throw new Error(buildClaudeErrorMessage(r.status, data));
+  const toolBlock = (data?.content || []).find(b => b.type === 'tool_use' && b.name === tool.name);
+  if (!toolBlock || !toolBlock.input || typeof toolBlock.input !== 'object') {
+    if (retry) return callClaudeTool(prompt + '\n\nIMPORTANT: keep every string SHORT — your previous attempt was too long and got cut off before it could return valid structured data.', tool, maxTokens, false);
+    throw new Error('Claude did not return structured data. Please try again.');
+  }
+  return toolBlock.input;
+}
+
+function heuristicParsingIssues(heur, parsed){
+  const issues = [];
+  if (!parsed?.contact?.email) issues.push({ severity:'warn', text:'No email address was detected in the resume text.' });
+  if (!parsed?.contact?.phone) issues.push({ severity:'info', text:'No phone number was detected in the resume text.' });
+  if (heur?.columnSuspect) issues.push({ severity:'warn', text:'The layout looks like it may have used multiple columns or dense tables — these are a common source of ATS text-extraction errors.' });
+  if (heur?.iconGlyphs) issues.push({ severity:'info', text:'Icon or glyph characters were detected in the file; some ATS parsers render these as garbage characters.' });
+  return issues;
+}
+
+const EXTRACT_RESUME_TOOL = {
+  name: 'extract_resume',
+  description: 'Extract structured fields from raw resume/CV text, the way a professional ATS parser would.',
+  input_schema: {
+    type: 'object',
+    properties: {
+      contact: {
+        type: 'object',
+        properties: {
+          name: { type: ['string','null'] },
+          email: { type: ['string','null'] },
+          phone: { type: ['string','null'] },
+          location: { type: ['string','null'] },
+          links: { type: 'array', items: { type: 'string' } }
+        },
+        required: ['name','email','phone','location','links']
+      },
+      summary: { type: ['string','null'], description: 'Professional summary / objective, verbatim or lightly trimmed. Null if absent.' },
+      skills: { type: 'array', items: { type: 'string' }, description: 'Individual skills/tools/technologies as separate short strings.' },
+      experience: {
+        type: 'array',
+        items: {
+          type: 'object',
+          properties: {
+            title: { type: 'string' },
+            company: { type: 'string' },
+            dates: { type: 'string', description: "e.g. 'Jan 2021 – Present'. Use 'Dates not stated' if absent." },
+            bullets: { type: 'array', items: { type: 'string' } }
+          },
+          required: ['title','company','dates','bullets']
+        }
+      },
+      education: {
+        type: 'array',
+        items: {
+          type: 'object',
+          properties: {
+            degree: { type: 'string' },
+            school: { type: 'string' },
+            dates: { type: 'string' }
+          },
+          required: ['degree','school','dates']
+        }
+      },
+      certifications: { type: 'array', items: { type: 'string' } },
+      projects: { type: 'array', items: { type: 'string' } },
+      publications: { type: 'array', items: { type: 'string' } },
+      languages: { type: 'array', items: { type: 'string' } },
+      otherSections: { type: 'array', items: { type: 'string' }, description: 'Headings present in the resume that do not map to any field above.' },
+      parsingIssues: {
+        type: 'array',
+        items: {
+          type: 'object',
+          properties: {
+            severity: { type: 'string', enum: ['err','warn','info'] },
+            text: { type: 'string' }
+          },
+          required: ['severity','text']
+        },
+        description: 'Real problems you noticed while extracting (ambiguous dates, unclear section boundaries, missing sections, garbled text, etc). Empty array if the resume reads cleanly.'
+      }
+    },
+    required: ['contact','summary','skills','experience','education','certifications','projects','publications','languages','otherSections','parsingIssues']
+  }
+};
+
+const ANALYZE_MATCH_TOOL = {
+  name: 'analyze_match',
+  description: 'Compare an already-extracted resume against a job description and produce a full ATS-style match analysis.',
+  input_schema: {
+    type: 'object',
+    properties: {
+      keywords: {
+        type: 'object',
+        properties: {
+          rows: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                keyword: { type: 'string' },
+                importance: { type: 'string', enum: ['High','Medium','Low'] },
+                found: { type: 'boolean', description: 'True if the resume contains this term OR a clear synonym/equivalent (e.g. "JS" for "JavaScript", "AWS" for "Amazon Web Services").' },
+                location: { type: ['string','null'], description: 'Where in the resume it was found (e.g. "Skills", "Experience — Acme Corp"), or null if not found.' },
+                recommendation: { type: 'string' }
+              },
+              required: ['keyword','importance','found','location','recommendation']
+            }
+          }
+        },
+        required: ['rows']
+      },
+      scores: {
+        type: 'object',
+        properties: {
+          overall: { type: 'integer', minimum: 0, maximum: 100 },
+          verdict: { type: 'string' },
+          categories: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                name: { type: 'string' },
+                score: { type: 'integer', minimum: 0, maximum: 100 },
+                why: { type: 'string', description: 'One sentence grounded in the actual resume/JD content, not a generic template line.' }
+              },
+              required: ['name','score','why']
+            },
+            description: 'Score categories: Skills Match, Experience Match, Education Match, Keywords, Technical Skills, Soft Skills, Formatting / ATS Compatibility, Certifications, Projects, Leadership.'
+          }
+        },
+        required: ['overall','verdict','categories']
+      },
+      sections: {
+        type: 'object',
+        properties: {
+          sections: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                name: { type: 'string' },
+                strengths: { type: 'array', items: { type: 'string' } },
+                weaknesses: { type: 'array', items: { type: 'string' } },
+                atsIssues: { type: 'array', items: { type: 'string' } },
+                suggestions: { type: 'array', items: { type: 'string' } }
+              },
+              required: ['name','strengths','weaknesses','atsIssues','suggestions']
+            },
+            description: 'One entry each for Summary, Skills, Experience, Education.'
+          }
+        },
+        required: ['sections']
+      },
+      reqfmt: {
+        type: 'object',
+        properties: {
+          requirements: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                req: { type: 'string' },
+                status: { type: 'string', enum: ['full','partial','missing'] },
+                note: { type: 'string' }
+              },
+              required: ['req','status','note']
+            }
+          },
+          formatting: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                item: { type: 'string' },
+                status: { type: 'string', enum: ['ok','warn','risk'] },
+                why: { type: 'string' }
+              },
+              required: ['item','status','why']
+            }
+          }
+        },
+        required: ['requirements','formatting']
+      },
+      sugs: {
+        type: 'object',
+        properties: {
+          high: { type: 'array', items: { '$ref': '#/$defs/suggestion' } },
+          medium: { type: 'array', items: { '$ref': '#/$defs/suggestion' } },
+          low: { type: 'array', items: { '$ref': '#/$defs/suggestion' } }
+        },
+        required: ['high','medium','low']
+      },
+      analysis: {
+        type: 'object',
+        properties: {
+          summary: { type: 'string', description: 'One short sentence overall take.' },
+          highlights: { type: 'array', items: { type: 'string' } },
+          rewrites: { type: 'array', items: { type: 'string' }, description: 'Concrete before/after style bullet rewrite suggestions.' },
+          explanations: { type: 'array', items: { type: 'string' } }
+        },
+        required: ['summary','highlights','rewrites','explanations']
+      }
+    },
+    required: ['keywords','scores','sections','reqfmt','sugs','analysis'],
+    '$defs': {
+      suggestion: {
+        type: 'object',
+        properties: {
+          title: { type: 'string' },
+          what: { type: 'string' },
+          where: { type: 'string' },
+          why: { type: 'string' },
+          before: { type: 'string' },
+          after: { type: 'string' },
+          impact: { type: 'string', description: "e.g. '+12 pts'" }
+        },
+        required: ['title','what','where','why','before','after','impact']
+      }
+    }
+  }
+};
+
+async function extractResumeWithClaude(text, heur){
+  const heurSummary = heur ? `Pages: ${heur.pages||1}. Characters: ${heur.chars||text.length}. Possible multi-column layout: ${!!heur.columnSuspect}. Icon/glyph characters found: ${heur.iconGlyphs||0}.` : 'No layout metadata available.';
+  const prompt = `Extract structured data from the resume text below, the way a professional ATS parser (Workday, Greenhouse, iCIMS) would. Only use information that is actually present in the text — never invent names, companies, dates, or skills. Use the extract_resume tool to respond.
+
+FILE METADATA: ${heurSummary}
+
+RESUME TEXT:
+"""
+${text.slice(0, 24000)}
+"""`;
+  const parsed = await callClaudeTool(prompt, EXTRACT_RESUME_TOOL, 4096);
+  parsed.parsingIssues = [...(parsed.parsingIssues || []), ...heuristicParsingIssues(heur, parsed)];
+  return parsed;
+}
+
+async function analyzeMatchWithClaude(parsed, jobText, title, heur){
+  const heurSummary = heur ? `${heur.pages||1} page(s), ${(heur.chars||0).toLocaleString()} characters, ${heur.links||0} hyperlink(s), ${heur.iconGlyphs||0} icon/glyph character(s)${heur.columnSuspect ? ', layout suggests multiple columns' : ''}.` : 'No layout metadata available.';
+  const prompt = `You are an expert ATS + technical recruiter evaluating how well a candidate's resume matches a job posting. Use real semantic understanding — recognize synonyms and equivalent terms (e.g. "JS" = "JavaScript", "AWS" = "Amazon Web Services", "ML" = "Machine Learning"), account for seniority and domain context, and ground every score and suggestion in the actual resume content below. Never invent facts that aren't in the resume. Use the analyze_match tool to respond.
+
+TARGET JOB TITLE: ${title || '(not provided)'}
+
+JOB DESCRIPTION:
+"""
+${(jobText || '').slice(0, 12000)}
+"""
+
+EXTRACTED RESUME (JSON):
+${JSON.stringify(parsed, null, 2).slice(0, 14000)}
+
+MEASURED FILE FORMATTING SIGNALS (use these, don't guess): ${heurSummary}`;
+  return callClaudeTool(prompt, ANALYZE_MATCH_TOOL, 8192);
+}
+
+/* ================= run pipeline ================= */
+const STEPS = [
+  ['extract','Extracting text from file'],
+  ['parse','Claude: structured resume extraction'],
+  ['analyze','Claude: JD match, scoring & suggestions']
+];
+function drawSteps(){ $('progSteps').innerHTML = STEPS.map(([k,l]) => `<div class="pstep" id="ps_${k}"><span class="dot"></span>${l}</div>`).join(''); }
+function mark(k, cls){ const el = $('ps_'+k); el.className = 'pstep ' + cls; }
+
+$('btnPreview').onclick = async () => {
+  if (!S.resumeText) {
+    $('reqHint').style.color = 'var(--red)';
+    $('reqHint').textContent = 'Upload a CV file first.';
+    return;
+  }
+
+  $('btnPreview').disabled = true;
+  $('reqHint').style.color = 'var(--scan)';
+  $('reqHint').textContent = 'Extracting resume with Claude…';
+  try {
+    S.extractionPreflight = getExtractionPreflight(S.resumeText, S.heur);
+    if (!S.extractionPreflight.ok) {
+      $('reqHint').style.color = 'var(--red)';
+      $('reqHint').textContent = S.extractionPreflight.reason;
+      alert('Resume extraction preflight failed: ' + S.extractionPreflight.reason + '\nTry a clearer PDF or DOCX, or paste the text manually.');
+      return;
+    }
+
+    const parsed = await extractResumeWithClaude(S.resumeText, S.heur);
+    S.resumeTextForAnalysis = S.resumeText;
+    S.parsed = parsed;
+    S.scores = null;
+    S.keywords = null;
+    S.sections = null;
+    S.reqfmt = null;
+    S.sugs = null;
+    S.analysis = null;
+    renderAll();
+    $('setup').style.display = 'none';
+    $('results').classList.add('show');
+    ['btnJson','btnPdf','btnReset'].forEach(id => $(id).style.display = '');
+    $('reqHint').style.color = 'var(--scan)';
+    $('reqHint').textContent = 'Preview ready. Add a job description and title to run the full match analysis.';
+    window.scrollTo({top:0});
+  } catch(err){
+    $('reqHint').style.color = 'var(--red)';
+    $('reqHint').textContent = err.message;
+    alert('Extraction failed: ' + err.message);
+  } finally {
+    $('btnPreview').disabled = false;
+  }
+};
+
+$('btnAnalyze').onclick = async () => {
+  const jd = getJD(), title = $('jobTitle').value.trim();
+  if (!S.resumeText) {
+    $('reqHint').style.color = 'var(--red)';
+    $('reqHint').textContent = 'Upload a CV file first.';
+    return;
+  }
+  if (!jd || !title) {
+    $('reqHint').style.color = 'var(--red)';
+    $('reqHint').textContent = 'Missing: ' + [!jd&&'job description', !title&&'job title'].filter(Boolean).join(', ') + '.';
+    return;
+  }
+  $('btnAnalyze').disabled = true;
+  $('progress').classList.add('show'); drawSteps();
+  mark('extract','done');
+  try {
+    S.extractionPreflight = getExtractionPreflight(S.resumeText, S.heur);
+    if (!S.extractionPreflight.ok) {
+      mark('parse','fail');
+      mark('analyze','fail');
+      $('reqHint').style.color = 'var(--red)';
+      $('reqHint').textContent = S.extractionPreflight.reason;
+      alert('Resume extraction preflight failed: ' + S.extractionPreflight.reason + '\nTry a clearer PDF or DOCX, or paste the text manually.');
+      return;
+    }
+
+    mark('parse','run');
+    const text = (document.getElementById('editedResumeText')?.value || '').trim() || S.resumeTextForAnalysis || S.resumeText;
+    S.resumeTextForAnalysis = text;
+    const parsed = await extractResumeWithClaude(text, S.heur);
+    S.parsed = parsed;
+    mark('parse','done');
+
+    mark('analyze','run');
+    const match = await analyzeMatchWithClaude(parsed, jd, title, S.heur);
+    S.keywords = match.keywords;
+    S.scores = match.scores;
+    S.sections = match.sections;
+    S.reqfmt = match.reqfmt;
+    S.sugs = match.sugs;
+    S.analysis = match.analysis;
+    mark('analyze','done');
+
+    renderAll();
+    $('setup').style.display = 'none';
+    $('results').classList.add('show');
+    ['btnJson','btnPdf','btnReset'].forEach(id => $(id).style.display = '');
+    window.scrollTo({top:0});
+  } catch(err){
+    mark('parse','fail');
+    mark('analyze','fail');
+    $('reqHint').style.color = 'var(--red)';
+    $('reqHint').textContent = err.message;
+    alert('Analysis failed: ' + err.message + '\nCheck the API key and whether the page is being served over http(s) instead of file://.');
+  } finally {
+    $('btnAnalyze').disabled = false;
+  }
+};
+
+$('btnReset').onclick = () => {
+  $('results').classList.remove('show');
+  $('setup').style.display = '';
+  $('progress').classList.remove('show');
+  ['btnJson','btnPdf','btnReset'].forEach(id => $(id).style.display = 'none');
+};
+$('btnPdf').onclick = () => window.print();
+$('btnJson').onclick = () => {
+  const blob = new Blob([JSON.stringify({file:S.fileName, heuristics:S.heur, parsed:S.parsed}, null, 2)], {type:'application/json'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob); a.download = 'parsed-resume.json'; a.click();
+  URL.revokeObjectURL(a.href);
+};
+
+/* ================= tabs ================= */
+$('tabnav').addEventListener('click', e => {
+  const b = e.target.closest('.tab'); if (!b) return;
+  document.querySelectorAll('.tab').forEach(t => t.classList.toggle('on', t===b));
+  document.querySelectorAll('.panel').forEach(p => p.classList.toggle('on', p.id===b.dataset.p));
+});
+
+/* ================= renderers ================= */
+const scoreColor = n => n >= 75 ? 'var(--scan)' : n >= 50 ? 'var(--amber)' : 'var(--red)';
+const list = (arr, empty) => (arr && arr.length) ? '<ul>'+arr.map(x=>'<li>'+esc(x)+'</li>').join('')+'</ul>' : `<div class="empty">${empty||'None noted.'}</div>`;
+const failCard = what => `<div class="issue err">The ${what} pass failed (API hiccup). Run a new analysis to retry.</div>`;
+
+function renderAll(){
+  renderDash(); renderParse(); renderScore(); renderKw(); renderSec(); renderSug(); renderFmt();
+}
+
+function renderDash(){
+  const overall = S.scores?.overall ?? 0;
+  $('dialNum').textContent = overall + '%';
+  const arc = $('dialArc');
+  arc.style.stroke = overall >= 75 ? '#4ADE9C' : overall >= 50 ? '#F2B24C' : '#F07A6E';
+  requestAnimationFrame(() => { arc.style.transition = 'stroke-dashoffset 1s ease'; arc.style.strokeDashoffset = 402 - 402*overall/100; });
+  const v = $('verdict');
+  v.textContent = S.scores?.verdict || '—';
+  v.style.background = overall >= 75 ? 'rgba(74,222,156,.15)' : overall >= 50 ? 'rgba(242,178,76,.15)' : 'rgba(240,122,110,.15)';
+  v.style.color = overall >= 75 ? '#4ADE9C' : overall >= 50 ? '#F2B24C' : '#F07A6E';
+
+  const issues = S.parsed?.parsingIssues || [];
+  const errs = issues.filter(i => i.severity === 'err').length;
+  const pq = errs ? (issues.length > 3 ? 'Poor' : 'Fair') : issues.length > 2 ? 'Good' : 'Excellent';
+  $('stParse').textContent = pq;
+  $('stParseD').textContent = issues.length + ' parsing note' + (issues.length===1?'':'s') + (errs ? ', ' + errs + ' blocking' : '');
+
+  const rows = S.keywords?.rows || [];
+  const found = rows.filter(r => r.found).length;
+  $('stKw').textContent = rows.length ? Math.round(found/rows.length*100) + '%' : '–';
+  $('stKwD').textContent = rows.length ? found + ' of ' + rows.length + ' key terms present' : 'no data';
+
+  const fmtCat = (S.scores?.categories||[]).find(c => /format/i.test(c.name));
+  const fa = fmtCat ? fmtCat.score : null;
+  $('stAts').textContent = fa === null ? '–' : fa >= 80 ? 'High' : fa >= 55 ? 'Medium' : 'Low';
+  $('stAtsD').textContent = fa === null ? '' : 'formatting score ' + fa + '/100';
+
+  $('stStrengths').innerHTML = (S.scores?.categories||[]).filter(c => c.score >= 75).slice(0,5)
+    .map(c => `<span class="chip good">${esc(c.name)} ${c.score}</span>`).join('') || '<span class="empty">none above 75</span>';
+  $('stMissing').innerHTML = rows.filter(r => !r.found && /high/i.test(r.importance)).slice(0,8)
+    .map(r => `<span class="chip bad">${esc(r.keyword)}</span>`).join('') || '<span class="chip good">no high importance keyword missing</span>';
+  $('stPriority').innerHTML = (S.sugs?.high||[]).slice(0,3)
+    .map(s => `<span class="chip warn">${esc(s.title)} ${esc(s.impact||'')}</span>`).join('') || '<span class="empty">–</span>';
+}
+
+function renderParse(){
+  const p = S.parsed, el = $('pParse');
+  if (!p) return el.innerHTML = failCard('parsing');
+  const c = p.contact || {};
+  const sourceText = (S.resumeTextForAnalysis || S.resumeText || '').trim();
+  const fld = (k,v) => `<div class="fld"><span class="k">${k}</span><span>${v || '<span class="empty">not detected — an ATS would leave this blank</span>'}</span></div>`;
+  const arr = a => (a&&a.length) ? a.map(esc).join(', ') : '';
+  const jobs = (p.experience||[]).map(j => `
+    <div class="job"><b>${esc(j.title||'?')}</b> — ${esc(j.company||'?')} <span class="dates">${esc(j.dates||'no dates detected')}</span>
+    ${(j.bullets&&j.bullets.length)?'<ul>'+j.bullets.map(b=>'<li>'+esc(b)+'</li>').join('')+'</ul>':''}</div>`).join('');
+  const edu = (p.education||[]).map(e => `<div>${esc(e.degree||'')} — ${esc(e.school||'')} <span class="tiny">${esc(e.dates||'')}</span></div>`).join('') ;
+  el.innerHTML = `
+    <h3 class="blocktitle">How an ATS read your file</h3>
+    <p class="tiny" style="margin-bottom:12px">This is the machine view of <b>${esc(S.fileName)}</b> — structure only, no layout. Anything wrong or missing here is invisible to a recruiter's filter. Use "Download parsed JSON" in the top bar for the raw structure.</p>
+    <div class="grid2">
+      <div class="parsed">
+        ${fld('Name', esc(c.name))}
+        ${fld('Email', esc(c.email))}
+        ${fld('Phone', esc(c.phone))}
+        ${fld('Location', esc(c.location))}
+        ${fld('Links', arr(c.links))}
+        ${fld('Summary', esc(p.summary))}
+        ${fld('Skills', arr(p.skills))}
+        ${fld('Certifications', arr(p.certifications))}
+        ${fld('Projects', arr(p.projects))}
+        ${fld('Publications', arr(p.publications))}
+        ${fld('Languages', arr(p.languages))}
+        ${fld('Education', edu)}
+        ${fld('Other sections', arr(p.otherSections))}
+      </div>
+      <div>
+        <div class="parsed" style="margin-bottom:16px"><div class="fld" style="border:none"><span class="k">Experience</span><div>${jobs || '<span class="empty">no positions detected</span>'}</div></div></div>
+        <div class="parsed" style="margin-bottom:16px">
+          <div class="fld" style="border:none; display:block">
+            <span class="k">Extracted text preview</span>
+            <textarea id="editedResumeText" style="width:100%;min-height:180px;margin-top:8px;border:1px solid var(--line);border-radius:8px;padding:10px;font-family:var(--mono);font-size:12px;line-height:1.45;">${esc(sourceText)}</textarea>
+            <div class="tiny" style="margin-top:8px">Edit this text before running the full match analysis. The full analysis uses this version.</div>
+          </div>
+        </div>
+        <h3 class="blocktitle">Parsing issues</h3>
+        ${(p.parsingIssues||[]).map(i => `<div class="issue ${esc(i.severity)}">${esc(i.text)}</div>`).join('') || '<div class="issue info">No parsing problems detected — the file reads cleanly.</div>'}
+      </div>
+    </div>`;
+}
+
+function renderScore(){
+  const el = $('pScore');
+  if (!S.scores) return el.innerHTML = failCard('scoring');
+  el.innerHTML = '<h3 class="blocktitle">Category scores — each one explains itself</h3>' +
+    (S.scores.categories||[]).map(c => `
+    <div class="cat">
+      <div class="head"><b>${esc(c.name)}</b><span class="pct" style="color:${scoreColor(c.score)}">${c.score}/100</span></div>
+      <div class="bar"><i style="width:${c.score}%;background:${scoreColor(c.score)}"></i></div>
+      <p>${esc(c.why)}</p>
+    </div>`).join('');
+}
+
+function renderKw(){
+  const el = $('pKw');
+  if (!S.keywords) return el.innerHTML = failCard('keyword');
+  const imp = i => /high/i.test(i)?'hi':/med/i.test(i)?'med':'lo';
+  el.innerHTML = `<h3 class="blocktitle">Keyword map</h3>
+  <table><thead><tr><th>Keyword</th><th>Importance</th><th>Found</th><th>Where in your CV</th><th>Recommendation</th></tr></thead><tbody>` +
+  (S.keywords.rows||[]).map(r => `<tr>
+    <td style="font-family:var(--mono);font-weight:600">${esc(r.keyword)}</td>
+    <td><span class="pill ${imp(r.importance)}">${esc(r.importance)}</span></td>
+    <td><span class="pill ${r.found?'yes':'no'}">${r.found?'Yes':'No'}</span></td>
+    <td>${esc(r.location||'—')}</td>
+    <td>${esc(r.recommendation)}</td></tr>`).join('') + '</tbody></table>';
+}
+
+function renderSec(){
+  const el = $('pSec');
+  if (!S.sections) return el.innerHTML = failCard('section review');
+  el.innerHTML = '<h3 class="blocktitle">Section by section</h3>' +
+    (S.sections.sections||[]).map((s,i) => `
+    <div class="sec${i===0?' open':''}">
+      <button onclick="this.parentElement.classList.toggle('open')">${esc(s.name)}</button>
+      <div class="body">
+        <h4 class="g">Strengths</h4>${list(s.strengths)}
+        <h4 class="b">Weaknesses</h4>${list(s.weaknesses)}
+        <h4 class="a">ATS issues</h4>${list(s.atsIssues,'No ATS specific problems.')}
+        <h4 class="i">Suggestions</h4>${list(s.suggestions)}
+      </div>
+    </div>`).join('');
+}
+
+function renderSug(){
+  const el = $('pSug');
+  if (!S.sugs) return el.innerHTML = failCard('suggestions');
+  const block = (arr, cls, label) => (arr&&arr.length) ? `<h3 class="blocktitle">${label}</h3>` + arr.map(s => `
+    <div class="sug ${cls}">
+      <div class="top"><b>${esc(s.title)}</b><span class="impact">est. ${esc(s.impact||'?')}</span></div>
+      <div class="meta"><b>What:</b> ${esc(s.what)}</div>
+      <div class="meta"><b>Where:</b> ${esc(s.where)}</div>
+      <div class="meta"><b>Why:</b> ${esc(s.why)}</div>
+      <div class="ba">
+        <div class="before"><span>Current</span>${esc(s.before)}</div>
+        <div class="after"><span>Suggested</span>${esc(s.after)}</div>
+      </div>
+    </div>`).join('') : '';
+  const synthesis = S.analysis ? `
+    <div class="cat">
+      <div class="head"><b>Claude synthesis</b><span class="pct">1 pass</span></div>
+      <p>${esc(S.analysis.summary || 'Natural language review ready.')}</p>
+      ${(S.analysis.highlights||[]).length ? `<ul>${S.analysis.highlights.map(h => '<li>'+esc(h)+'</li>').join('')}</ul>` : ''}
+      ${(S.analysis.rewrites||[]).length ? `<h4 class="g">Bullet rewrites</h4><ul>${S.analysis.rewrites.map(h => '<li>'+esc(h)+'</li>').join('')}</ul>` : ''}
+      ${(S.analysis.explanations||[]).length ? `<h4 class="i">Explanations</h4><ul>${S.analysis.explanations.map(h => '<li>'+esc(h)+'</li>').join('')}</ul>` : ''}
+    </div>` : '';
+  el.innerHTML = synthesis +
+    block(S.sugs.high,'hi','High impact') +
+    block(S.sugs.medium,'med','Medium impact') +
+    block(S.sugs.low,'lo','Low impact') ||
+    '<div class="empty">No suggestions returned.</div>';
+}
+
+function renderFmt(){
+  const el = $('pFmt');
+  if (!S.reqfmt) return el.innerHTML = failCard('requirements / formatting');
+  const st = s => /full/i.test(s)?['yes','Fully covered']:/part/i.test(s)?['part','Partially covered']:/hid/i.test(s)?['part','Present but hard for ATS']:['no','Missing'];
+  const fs = s => s==='ok'?['yes','OK']:s==='warn'?['part','Caution']:['no','Risk'];
+  el.innerHTML = `
+    <h3 class="blocktitle">Job requirements checklist</h3>
+    <table><thead><tr><th>Requirement</th><th>Status</th><th>Notes</th></tr></thead><tbody>` +
+    (S.reqfmt.requirements||[]).map(r => { const [c,l] = st(r.status); return `<tr><td>${esc(r.req)}</td><td><span class="pill ${c}">${l}</span></td><td>${esc(r.note)}</td></tr>`; }).join('') +
+    `</tbody></table>
+    <h3 class="blocktitle">ATS formatting review</h3>
+    <p class="tiny" style="margin-bottom:10px">Based on what was actually measurable in your file: ${S.heur.pages} page(s), ${S.heur.chars.toLocaleString()} characters, ${S.heur.links} hyperlink(s), ${S.heur.iconGlyphs} icon/glyph character(s)${S.heur.columnSuspect ? ', layout suggests multiple columns' : ''}.</p>
+    <table><thead><tr><th>Element</th><th>Status</th><th>Why it matters</th></tr></thead><tbody>` +
+    (S.reqfmt.formatting||[]).map(f => { const [c,l] = fs(f.status); return `<tr><td>${esc(f.item)}</td><td><span class="pill ${c}">${l}</span></td><td>${esc(f.why)}</td></tr>`; }).join('') +
+    '</tbody></table>';
+}
+
+</script>
+</body>
+</html>
