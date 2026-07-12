@@ -12,12 +12,32 @@ ROOT = Path(__file__).resolve().parent
 PORT = int(os.environ.get("PORT") or (sys.argv[1] if len(sys.argv) > 1 else 8000))
 ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages"
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "").strip()
-ATS_USERNAME = os.environ.get("ATS_USERNAME", "").strip()
-ATS_PASSWORD = os.environ.get("ATS_PASSWORD", "").strip()
-AUTH_ENABLED = bool(ATS_USERNAME and ATS_PASSWORD)
 
 # Paths that must stay reachable without credentials (Render's health check hits this).
 PUBLIC_PATHS = {"/api/health"}
+
+
+def _load_users():
+    """Parses ATS_USERS="alice:pw1,bob:pw2" into {username: password}.
+    Also honors the older single-pair ATS_USERNAME/ATS_PASSWORD for convenience."""
+    users = {}
+    for pair in os.environ.get("ATS_USERS", "").split(","):
+        pair = pair.strip()
+        if not pair or ":" not in pair:
+            continue
+        user, _, password = pair.partition(":")
+        user, password = user.strip(), password.strip()
+        if user and password:
+            users[user] = password
+    legacy_user = os.environ.get("ATS_USERNAME", "").strip()
+    legacy_pass = os.environ.get("ATS_PASSWORD", "").strip()
+    if legacy_user and legacy_pass:
+        users[legacy_user] = legacy_pass
+    return users
+
+
+USERS = _load_users()
+AUTH_ENABLED = bool(USERS)
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -34,8 +54,9 @@ class Handler(BaseHTTPRequestHandler):
                 user, _, password = decoded.partition(":")
             except Exception:
                 user, password = "", ""
-            if hmac.compare_digest(user, ATS_USERNAME) and hmac.compare_digest(password, ATS_PASSWORD):
-                return True
+            for expected_user, expected_password in USERS.items():
+                if hmac.compare_digest(user, expected_user) and hmac.compare_digest(password, expected_password):
+                    return True
         self.send_response(401)
         self.send_header("WWW-Authenticate", 'Basic realm="ATS Checker"')
         self.send_header("Content-Type", "text/plain")
@@ -159,9 +180,9 @@ if __name__ == "__main__":
     if not ANTHROPIC_API_KEY:
         print("WARNING: ANTHROPIC_API_KEY is not set. /api/claude will return 500 until it is.")
     if AUTH_ENABLED:
-        print("Basic Auth is ENABLED (ATS_USERNAME/ATS_PASSWORD set).")
+        print(f"Basic Auth is ENABLED for {len(USERS)} user(s): {', '.join(USERS)}.")
     else:
-        print("WARNING: ATS_USERNAME/ATS_PASSWORD not set — Basic Auth is DISABLED. Do not deploy publicly like this.")
+        print("WARNING: ATS_USERS (or ATS_USERNAME/ATS_PASSWORD) not set — Basic Auth is DISABLED. Do not deploy publicly like this.")
     try:
         server.serve_forever()
     except KeyboardInterrupt:

@@ -9,7 +9,5 @@ services:
     envVars:
       - key: ANTHROPIC_API_KEY
         sync: false
-      - key: ATS_USERNAME
-        sync: false
-      - key: ATS_PASSWORD
+      - key: ATS_USERS
         sync: false

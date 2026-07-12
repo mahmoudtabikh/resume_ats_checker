@@ -26,12 +26,13 @@ git push -u origin main
 1. Sign in at https://dashboard.render.com (GitHub login is easiest).
 2. Click **New** → **Blueprint**, and pick the repo you just pushed.
    Render will detect `render.yaml` in this folder automatically.
-3. Render will ask you to fill in the three secret environment variables
-   declared in `render.yaml` (they're intentionally left blank in the file
-   so they never end up in git):
+3. Render will ask you to fill in the secret environment variables declared
+   in `render.yaml` (intentionally left blank in the file so they never end
+   up in git):
    - `ANTHROPIC_API_KEY` — your Anthropic API key
-   - `ATS_USERNAME` — pick any username you and your sister will share
-   - `ATS_PASSWORD` — pick a real password (not something guessable)
+   - `ATS_USERS` — one or more `username:password` pairs, comma-separated,
+     e.g. `mahmoud:correcthorse123,sister:anotherpassword456`. Each person
+     gets their own login instead of sharing one password.
 4. Click **Apply** / **Deploy**.
 
 Render will build and start the service. The first deploy takes a minute or two.
@@ -43,8 +44,21 @@ immediately pop up a native username/password prompt (HTTP Basic Auth) before
 anything loads. Wrong or missing credentials → blank 401 page. Correct
 credentials → the app loads normally.
 
-Share the URL + username + password with your sister directly (e.g. in a
-message), not anywhere public.
+Share the URL + her own username + password with your sister directly (e.g.
+in a message), not anywhere public.
+
+## Adding or removing users
+
+Go to the Render dashboard → your service → **Environment** → edit the
+`ATS_USERS` value → **Save Changes**. Render redeploys automatically
+(takes under a minute) with the new list.
+
+- **Add someone**: append `,newname:theirpassword` to the existing value.
+- **Remove someone**: delete their `name:password` pair from the value.
+- No code changes or redeploy-from-git needed — it's just an env var.
+
+For local testing, set the same env var before running `python server.py`:
+`ATS_USERS="mahmoud:pass1,sister:pass2"`.
 
 ## Notes
 
