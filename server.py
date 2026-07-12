@@ -119,7 +119,7 @@ class Handler(BaseHTTPRequestHandler):
         )
 
         try:
-            with urllib.request.urlopen(request, timeout=60) as response:
+            with urllib.request.urlopen(request, timeout=120) as response:
                 response_body = response.read().decode("utf-8")
                 self.send_response(response.status)
                 self.send_header("Content-Type", "application/json")
