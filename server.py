@@ -118,6 +118,11 @@ class Handler(BaseHTTPRequestHandler):
             method="POST",
         )
 
+        tool_name = None
+        tools = payload.get("tools") or []
+        if tools:
+            tool_name = tools[0].get("name")
+
         try:
             with urllib.request.urlopen(request, timeout=120) as response:
                 response_body = response.read().decode("utf-8")
@@ -128,12 +133,14 @@ class Handler(BaseHTTPRequestHandler):
                 self.wfile.write(response_body.encode("utf-8"))
         except urllib.error.HTTPError as exc:
             error_body = exc.read().decode("utf-8", "ignore")
+            print(f"[claude proxy] tool={tool_name} HTTP {exc.code}: {error_body[:2000]}", flush=True)
             self.send_response(exc.code)
             self.send_header("Content-Type", "application/json")
             self.send_header("Access-Control-Allow-Origin", "*")
             self.end_headers()
             self.wfile.write(error_body.encode("utf-8"))
         except Exception as exc:
+            print(f"[claude proxy] tool={tool_name} {type(exc).__name__}: {exc}", flush=True)
             self.send_json({"error": str(exc)}, status=502)
 
     def serve_static(self, path):
