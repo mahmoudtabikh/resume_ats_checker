@@ -1,9 +1,15 @@
-// Regression guard for the bug fixed in PR #1: Anthropic's tool-use schema
-// handling does not reliably support JSON Schema $ref/$defs. A $ref in
-// ANALYZE_MATCH_TOOL's input_schema broke every real "Run ATS analysis" call
-// in production. This script extracts the tool schema definitions from
-// ats-resume-checker.html, evaluates them, and fails if $ref/$defs reappear
-// or if either tool is missing required top-level keys.
+// Regression guard for two production bugs:
+//
+// 1. (PR #1) Anthropic's tool-use schema handling does not reliably support
+//    JSON Schema $ref/$defs. A $ref in a tool's input_schema broke every
+//    real "Run ATS analysis" call.
+// 2. (PR #3) Anthropic's strict-mode grammar compiler rejects tool schemas
+//    that are too structurally complex ("The compiled grammar is too
+//    large"). The original single analyze_match tool had 15 nested object
+//    schemas and was rejected; it was split into score_match + write_feedback
+//    (6 object schemas each). This script caps object-schema count per tool
+//    well below that failure point so a similar regression is caught here,
+//    not in production against a real API key.
 //
 // This only evaluates the plain object-literal const declarations (no DOM
 // APIs involved), so it's safe to run in plain Node without a browser.
@@ -30,12 +36,18 @@ if (start === -1 || end === -1 || end <= start) {
 
 const schemaSource = html.slice(start, end);
 
-let EXTRACT_RESUME_TOOL, SUGGESTION_SCHEMA, ANALYZE_MATCH_TOOL, NULLABLE_STRING;
+// Max distinct type:"object" nodes allowed in a single tool's input_schema.
+// The tool that got rejected by Anthropic's grammar compiler had 15; the
+// post-split tools have 6 each. 10 gives headroom while still catching a
+// schema heading back toward the failure zone before it ships.
+const MAX_OBJECT_SCHEMAS_PER_TOOL = 10;
+
+let EXTRACT_RESUME_TOOL, SUGGESTION_SCHEMA, SCORE_MATCH_TOOL, WRITE_FEEDBACK_TOOL, NULLABLE_STRING;
 try {
   const evaluate = new Function(
-    `${schemaSource}\nreturn { EXTRACT_RESUME_TOOL, SUGGESTION_SCHEMA, ANALYZE_MATCH_TOOL, NULLABLE_STRING };`
+    `${schemaSource}\nreturn { EXTRACT_RESUME_TOOL, SUGGESTION_SCHEMA, SCORE_MATCH_TOOL, WRITE_FEEDBACK_TOOL, NULLABLE_STRING };`
   );
-  ({ EXTRACT_RESUME_TOOL, SUGGESTION_SCHEMA, ANALYZE_MATCH_TOOL, NULLABLE_STRING } = evaluate());
+  ({ EXTRACT_RESUME_TOOL, SUGGESTION_SCHEMA, SCORE_MATCH_TOOL, WRITE_FEEDBACK_TOOL, NULLABLE_STRING } = evaluate());
 } catch (err) {
   console.error("Tool schema definitions failed to evaluate as JavaScript:", err.message);
   process.exit(1);
@@ -55,7 +67,7 @@ function findObjectSchemas(node, out = []) {
   return out;
 }
 
-for (const [name, tool] of Object.entries({ EXTRACT_RESUME_TOOL, ANALYZE_MATCH_TOOL })) {
+for (const [name, tool] of Object.entries({ EXTRACT_RESUME_TOOL, SCORE_MATCH_TOOL, WRITE_FEEDBACK_TOOL })) {
   if (!tool || typeof tool !== "object") {
     failures.push(`${name} did not evaluate to an object`);
     continue;
@@ -85,10 +97,17 @@ for (const [name, tool] of Object.entries({ EXTRACT_RESUME_TOOL, ANALYZE_MATCH_T
   if (/"minimum"|"maximum"|"multipleOf"/.test(json)) {
     failures.push(`${name} uses minimum/maximum/multipleOf — not supported in strict mode`);
   }
-  for (const objectSchema of findObjectSchemas(tool.input_schema)) {
+
+  const objectSchemas = findObjectSchemas(tool.input_schema);
+  for (const objectSchema of objectSchemas) {
     if (objectSchema.additionalProperties !== false) {
       failures.push(`${name} has an object schema missing "additionalProperties: false" (required in strict mode): ${JSON.stringify(objectSchema).slice(0, 120)}...`);
     }
+  }
+  if (objectSchemas.length > MAX_OBJECT_SCHEMAS_PER_TOOL) {
+    failures.push(
+      `${name} has ${objectSchemas.length} nested object schemas (limit ${MAX_OBJECT_SCHEMAS_PER_TOOL}) — this is the exact shape of complexity Anthropic's grammar compiler rejected in production (bug fixed in PR #3). Split it into smaller tool calls instead of raising this limit.`
+    );
   }
 }
 
@@ -103,5 +122,6 @@ if (failures.length) {
 
 console.log(
   `Tool schema check passed. EXTRACT_RESUME_TOOL: ${JSON.stringify(EXTRACT_RESUME_TOOL).length} bytes, ` +
-    `ANALYZE_MATCH_TOOL: ${JSON.stringify(ANALYZE_MATCH_TOOL).length} bytes.`
+    `SCORE_MATCH_TOOL: ${JSON.stringify(SCORE_MATCH_TOOL).length} bytes, ` +
+    `WRITE_FEEDBACK_TOOL: ${JSON.stringify(WRITE_FEEDBACK_TOOL).length} bytes.`
 );

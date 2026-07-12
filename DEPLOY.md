@@ -71,7 +71,8 @@ For local testing, set the same env var before running `python server.py`:
   in a plaintext `config.js` file that was served to anyone who requested it.
   That file has been deleted, but if you haven't already, rotate that old key
   at https://console.anthropic.com/settings/keys — treat it as compromised.
-- **Costs**: each Preview click and each Analyze click makes real Claude API
-  calls (Analyze makes two: one extraction call, one JD-matching call).
-  Personal, occasional use by two people costs a few cents to a few dollars a
-  month depending on usage — check https://console.anthropic.com/settings/billing.
+- **Costs**: each Preview click makes one Claude API call (extraction), and
+  each Analyze click makes three (extraction, keyword/score matching, section
+  feedback). Personal, occasional use by two people costs a few cents to a
+  few dollars a month depending on usage — check
+  https://console.anthropic.com/settings/billing.

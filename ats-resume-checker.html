@@ -651,9 +651,16 @@ const SUGGESTION_SCHEMA = {
   required: ['title','what','where','why','before','after','impact']
 };
 
-const ANALYZE_MATCH_TOOL = {
-  name: 'analyze_match',
-  description: 'Compare an already-extracted resume against a job description and produce a full ATS-style match analysis.',
+// analyze_match was originally one tool covering keywords+scores+sections+
+// reqfmt+sugs+analysis (15 nested object schemas). Anthropic's strict-mode
+// grammar compiler rejected it as too complex ("The compiled grammar is too
+// large"). Split into two smaller tool calls, each well within the limit.
+// The `formatting` review (Headings/Columns/Icons/Contact line) moved out
+// entirely — it's fully derivable from heur + parsed.contact client-side
+// (see buildFormattingReview), so it never needed an LLM call anyway.
+const SCORE_MATCH_TOOL = {
+  name: 'score_match',
+  description: 'Compare an already-extracted resume against a job description: keyword coverage, category scores, and a requirements checklist.',
   strict: true,
   input_schema: {
     type: 'object',
@@ -704,6 +711,32 @@ const ANALYZE_MATCH_TOOL = {
         },
         required: ['overall','verdict','categories']
       },
+      requirements: {
+        type: 'array',
+        items: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            req: { type: 'string' },
+            status: { type: 'string', enum: ['full','partial','missing'] },
+            note: { type: 'string' }
+          },
+          required: ['req','status','note']
+        }
+      }
+    },
+    required: ['keywords','scores','requirements']
+  }
+};
+
+const WRITE_FEEDBACK_TOOL = {
+  name: 'write_feedback',
+  description: 'Given an already-scored resume/JD match, write the section-by-section review, prioritized suggestions, and an overall synthesis.',
+  strict: true,
+  input_schema: {
+    type: 'object',
+    additionalProperties: false,
+    properties: {
       sections: {
         type: 'object',
         additionalProperties: false,
@@ -727,39 +760,6 @@ const ANALYZE_MATCH_TOOL = {
         },
         required: ['sections']
       },
-      reqfmt: {
-        type: 'object',
-        additionalProperties: false,
-        properties: {
-          requirements: {
-            type: 'array',
-            items: {
-              type: 'object',
-              additionalProperties: false,
-              properties: {
-                req: { type: 'string' },
-                status: { type: 'string', enum: ['full','partial','missing'] },
-                note: { type: 'string' }
-              },
-              required: ['req','status','note']
-            }
-          },
-          formatting: {
-            type: 'array',
-            items: {
-              type: 'object',
-              additionalProperties: false,
-              properties: {
-                item: { type: 'string' },
-                status: { type: 'string', enum: ['ok','warn','risk'] },
-                why: { type: 'string' }
-              },
-              required: ['item','status','why']
-            }
-          }
-        },
-        required: ['requirements','formatting']
-      },
       sugs: {
         type: 'object',
         additionalProperties: false,
@@ -782,7 +782,7 @@ const ANALYZE_MATCH_TOOL = {
         required: ['summary','highlights','rewrites','explanations']
       }
     },
-    required: ['keywords','scores','sections','reqfmt','sugs','analysis']
+    required: ['sections','sugs','analysis']
   }
 };
 
@@ -801,9 +801,18 @@ ${text.slice(0, 24000)}
   return parsed;
 }
 
-async function analyzeMatchWithClaude(parsed, jobText, title, heur){
-  const heurSummary = heur ? `${heur.pages||1} page(s), ${(heur.chars||0).toLocaleString()} characters, ${heur.links||0} hyperlink(s), ${heur.iconGlyphs||0} icon/glyph character(s)${heur.columnSuspect ? ', layout suggests multiple columns' : ''}.` : 'No layout metadata available.';
-  const prompt = `You are an expert ATS + technical recruiter evaluating how well a candidate's resume matches a job posting. Use real semantic understanding — recognize synonyms and equivalent terms (e.g. "JS" = "JavaScript", "AWS" = "Amazon Web Services", "ML" = "Machine Learning"), account for seniority and domain context, and ground every score and suggestion in the actual resume content below. Never invent facts that aren't in the resume. Use the analyze_match tool to respond.
+function buildFormattingReview(parsed, heur){
+  return [
+    { item:'Headings', status: 'ok', why:'The resume appears to have recognizable section labels.' },
+    { item:'Columns', status: heur?.columnSuspect ? 'warn' : 'ok', why: heur?.columnSuspect ? 'Multi-column layouts can confuse ATS parsers.' : 'No obvious column risk was detected.' },
+    { item:'Icons / glyphs', status: heur?.iconGlyphs ? 'warn' : 'ok', why: heur?.iconGlyphs ? 'Extra symbols can make text extraction noisier.' : 'The extraction looks clean.' },
+    { item:'Contact line', status: (parsed?.contact?.email || parsed?.contact?.phone) ? 'ok' : 'warn', why:'Clear contact details are important for ATS and recruiters.' }
+  ];
+}
+
+async function scoreMatchWithClaude(parsed, jobText, title, heur){
+  const heurSummary = heur ? `${heur.pages||1} page(s), ${(heur.chars||0).toLocaleString()} characters${heur.columnSuspect ? ', layout suggests multiple columns' : ''}.` : 'No layout metadata available.';
+  const prompt = `You are an expert ATS + technical recruiter evaluating how well a candidate's resume matches a job posting. Use real semantic understanding — recognize synonyms and equivalent terms (e.g. "JS" = "JavaScript", "AWS" = "Amazon Web Services", "ML" = "Machine Learning"), account for seniority and domain context, and ground every score in the actual resume content below. Never invent facts that aren't in the resume. Use the score_match tool to respond.
 
 TARGET JOB TITLE: ${title || '(not provided)'}
 
@@ -815,15 +824,34 @@ ${(jobText || '').slice(0, 12000)}
 EXTRACTED RESUME (JSON):
 ${JSON.stringify(parsed, null, 2).slice(0, 14000)}
 
-MEASURED FILE FORMATTING SIGNALS (use these, don't guess): ${heurSummary}`;
-  return callClaudeTool(prompt, ANALYZE_MATCH_TOOL, 8192);
+FILE STATS: ${heurSummary}`;
+  return callClaudeTool(prompt, SCORE_MATCH_TOOL, 4096);
+}
+
+async function writeFeedbackWithClaude(parsed, jobText, title, heur, scoreMatch){
+  const prompt = `You are an expert ATS + technical recruiter writing feedback on a resume against a job posting. Ground every strength, weakness, and suggestion in the actual resume content and the scoring below — don't repeat generic advice, and never invent facts that aren't in the resume. Use the write_feedback tool to respond.
+
+TARGET JOB TITLE: ${title || '(not provided)'}
+
+JOB DESCRIPTION:
+"""
+${(jobText || '').slice(0, 8000)}
+"""
+
+EXTRACTED RESUME (JSON):
+${JSON.stringify(parsed, null, 2).slice(0, 12000)}
+
+ALREADY-COMPUTED KEYWORD/SCORE ANALYSIS (build your feedback on top of this, keep it consistent):
+${JSON.stringify(scoreMatch, null, 2).slice(0, 8000)}`;
+  return callClaudeTool(prompt, WRITE_FEEDBACK_TOOL, 4096);
 }
 
 /* ================= run pipeline ================= */
 const STEPS = [
   ['extract','Extracting text from file'],
   ['parse','Claude: structured resume extraction'],
-  ['analyze','Claude: JD match, scoring & suggestions']
+  ['score','Claude: keyword & score matching'],
+  ['feedback','Claude: section feedback & suggestions']
 ];
 function drawSteps(){ $('progSteps').innerHTML = STEPS.map(([k,l]) => `<div class="pstep" id="ps_${k}"><span class="dot"></span>${l}</div>`).join(''); }
 function mark(k, cls){ const el = $('ps_'+k); el.className = 'pstep ' + cls; }
@@ -891,7 +919,8 @@ $('btnAnalyze').onclick = async () => {
     S.extractionPreflight = getExtractionPreflight(S.resumeText, S.heur);
     if (!S.extractionPreflight.ok) {
       mark('parse','fail');
-      mark('analyze','fail');
+      mark('score','fail');
+      mark('feedback','fail');
       $('reqHint').style.color = 'var(--red)';
       $('reqHint').textContent = S.extractionPreflight.reason;
       alert('Resume extraction preflight failed: ' + S.extractionPreflight.reason + '\nTry a clearer PDF or DOCX, or paste the text manually.');
@@ -905,15 +934,19 @@ $('btnAnalyze').onclick = async () => {
     S.parsed = parsed;
     mark('parse','done');
 
-    mark('analyze','run');
-    const match = await analyzeMatchWithClaude(parsed, jd, title, S.heur);
-    S.keywords = match.keywords;
-    S.scores = match.scores;
-    S.sections = match.sections;
-    S.reqfmt = match.reqfmt;
-    S.sugs = match.sugs;
-    S.analysis = match.analysis;
-    mark('analyze','done');
+    mark('score','run');
+    const scoreMatch = await scoreMatchWithClaude(parsed, jd, title, S.heur);
+    S.keywords = scoreMatch.keywords;
+    S.scores = scoreMatch.scores;
+    S.reqfmt = { requirements: scoreMatch.requirements, formatting: buildFormattingReview(parsed, S.heur) };
+    mark('score','done');
+
+    mark('feedback','run');
+    const feedback = await writeFeedbackWithClaude(parsed, jd, title, S.heur, scoreMatch);
+    S.sections = feedback.sections;
+    S.sugs = feedback.sugs;
+    S.analysis = feedback.analysis;
+    mark('feedback','done');
 
     renderAll();
     $('setup').style.display = 'none';
@@ -922,7 +955,8 @@ $('btnAnalyze').onclick = async () => {
     window.scrollTo({top:0});
   } catch(err){
     mark('parse','fail');
-    mark('analyze','fail');
+    mark('score','fail');
+    mark('feedback','fail');
     $('reqHint').style.color = 'var(--red)';
     $('reqHint').textContent = err.message;
     alert('Analysis failed: ' + err.message + '\nCheck the API key and whether the page is being served over http(s) instead of file://.');
