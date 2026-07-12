@@ -557,29 +557,40 @@ function heuristicParsingIssues(heur, parsed){
   return issues;
 }
 
+// Both tools use `strict: true` (Anthropic's grammar-constrained structured
+// outputs) so the response is *guaranteed* to match the schema, not just
+// best-effort. Strict mode requires additionalProperties:false on every
+// object, no numeric min/max, and nullable fields expressed as anyOf rather
+// than a `type` array — see https://platform.claude.com/docs/en/build-with-claude/structured-outputs
+const NULLABLE_STRING = { anyOf: [{ type: 'string' }, { type: 'null' }] };
+
 const EXTRACT_RESUME_TOOL = {
   name: 'extract_resume',
   description: 'Extract structured fields from raw resume/CV text, the way a professional ATS parser would.',
+  strict: true,
   input_schema: {
     type: 'object',
+    additionalProperties: false,
     properties: {
       contact: {
         type: 'object',
+        additionalProperties: false,
         properties: {
-          name: { type: ['string','null'] },
-          email: { type: ['string','null'] },
-          phone: { type: ['string','null'] },
-          location: { type: ['string','null'] },
+          name: NULLABLE_STRING,
+          email: NULLABLE_STRING,
+          phone: NULLABLE_STRING,
+          location: NULLABLE_STRING,
           links: { type: 'array', items: { type: 'string' } }
         },
         required: ['name','email','phone','location','links']
       },
-      summary: { type: ['string','null'], description: 'Professional summary / objective, verbatim or lightly trimmed. Null if absent.' },
+      summary: { ...NULLABLE_STRING, description: 'Professional summary / objective, verbatim or lightly trimmed. Null if absent.' },
       skills: { type: 'array', items: { type: 'string' }, description: 'Individual skills/tools/technologies as separate short strings.' },
       experience: {
         type: 'array',
         items: {
           type: 'object',
+          additionalProperties: false,
           properties: {
             title: { type: 'string' },
             company: { type: 'string' },
@@ -593,6 +604,7 @@ const EXTRACT_RESUME_TOOL = {
         type: 'array',
         items: {
           type: 'object',
+          additionalProperties: false,
           properties: {
             degree: { type: 'string' },
             school: { type: 'string' },
@@ -610,6 +622,7 @@ const EXTRACT_RESUME_TOOL = {
         type: 'array',
         items: {
           type: 'object',
+          additionalProperties: false,
           properties: {
             severity: { type: 'string', enum: ['err','warn','info'] },
             text: { type: 'string' }
@@ -625,6 +638,7 @@ const EXTRACT_RESUME_TOOL = {
 
 const SUGGESTION_SCHEMA = {
   type: 'object',
+  additionalProperties: false,
   properties: {
     title: { type: 'string' },
     what: { type: 'string' },
@@ -640,21 +654,25 @@ const SUGGESTION_SCHEMA = {
 const ANALYZE_MATCH_TOOL = {
   name: 'analyze_match',
   description: 'Compare an already-extracted resume against a job description and produce a full ATS-style match analysis.',
+  strict: true,
   input_schema: {
     type: 'object',
+    additionalProperties: false,
     properties: {
       keywords: {
         type: 'object',
+        additionalProperties: false,
         properties: {
           rows: {
             type: 'array',
             items: {
               type: 'object',
+              additionalProperties: false,
               properties: {
                 keyword: { type: 'string' },
                 importance: { type: 'string', enum: ['High','Medium','Low'] },
                 found: { type: 'boolean', description: 'True if the resume contains this term OR a clear synonym/equivalent (e.g. "JS" for "JavaScript", "AWS" for "Amazon Web Services").' },
-                location: { type: ['string','null'], description: 'Where in the resume it was found (e.g. "Skills", "Experience — Acme Corp"), or null if not found.' },
+                location: { ...NULLABLE_STRING, description: 'Where in the resume it was found (e.g. "Skills", "Experience — Acme Corp"), or null if not found.' },
                 recommendation: { type: 'string' }
               },
               required: ['keyword','importance','found','location','recommendation']
@@ -665,16 +683,18 @@ const ANALYZE_MATCH_TOOL = {
       },
       scores: {
         type: 'object',
+        additionalProperties: false,
         properties: {
-          overall: { type: 'integer', minimum: 0, maximum: 100 },
+          overall: { type: 'integer', description: '0-100.' },
           verdict: { type: 'string' },
           categories: {
             type: 'array',
             items: {
               type: 'object',
+              additionalProperties: false,
               properties: {
                 name: { type: 'string' },
-                score: { type: 'integer', minimum: 0, maximum: 100 },
+                score: { type: 'integer', description: '0-100.' },
                 why: { type: 'string', description: 'One sentence grounded in the actual resume/JD content, not a generic template line.' }
               },
               required: ['name','score','why']
@@ -686,11 +706,13 @@ const ANALYZE_MATCH_TOOL = {
       },
       sections: {
         type: 'object',
+        additionalProperties: false,
         properties: {
           sections: {
             type: 'array',
             items: {
               type: 'object',
+              additionalProperties: false,
               properties: {
                 name: { type: 'string' },
                 strengths: { type: 'array', items: { type: 'string' } },
@@ -707,11 +729,13 @@ const ANALYZE_MATCH_TOOL = {
       },
       reqfmt: {
         type: 'object',
+        additionalProperties: false,
         properties: {
           requirements: {
             type: 'array',
             items: {
               type: 'object',
+              additionalProperties: false,
               properties: {
                 req: { type: 'string' },
                 status: { type: 'string', enum: ['full','partial','missing'] },
@@ -724,6 +748,7 @@ const ANALYZE_MATCH_TOOL = {
             type: 'array',
             items: {
               type: 'object',
+              additionalProperties: false,
               properties: {
                 item: { type: 'string' },
                 status: { type: 'string', enum: ['ok','warn','risk'] },
@@ -737,6 +762,7 @@ const ANALYZE_MATCH_TOOL = {
       },
       sugs: {
         type: 'object',
+        additionalProperties: false,
         properties: {
           high: { type: 'array', items: SUGGESTION_SCHEMA },
           medium: { type: 'array', items: SUGGESTION_SCHEMA },
@@ -746,6 +772,7 @@ const ANALYZE_MATCH_TOOL = {
       },
       analysis: {
         type: 'object',
+        additionalProperties: false,
         properties: {
           summary: { type: 'string', description: 'One short sentence overall take.' },
           highlights: { type: 'array', items: { type: 'string' } },
